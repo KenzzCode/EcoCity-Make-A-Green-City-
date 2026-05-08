@@ -29,7 +29,10 @@ export type BuildingType =
   | 'TEMPLE'
   | 'FIRE_STATION'
   | 'CAR_DEALER'
-  | 'RESIDENTIAL_GRID_CONTROLLER';
+  | 'RESIDENTIAL_GRID_CONTROLLER'
+  | 'MAYOR_OFFICE'
+  | 'GOVERNOR_OFFICE'
+  | 'PARLIAMENT';
 
 export interface BuildingData {
   id: string;
@@ -77,13 +80,23 @@ export interface GameState {
   theme: 'dark' | 'light';
   language: 'id' | 'en' | 'ar';
   gameSpeed: number;
+  level: number;
+  exp: number;
+  maxExp: number;
+  unlockedMaps: string[];
+  currentMapId: string;
+  downloadedApps: string[];
+  activeFires: { x: number, y: number, intensity: number }[];
+  quests: Quest[];
   history: {
-    time: number;
-    money: number;
-    pollution: number;
-    ecoHealth: number;
-  }[];
-  lastTaxCollection?: number;
+    pop: number[];
+    money: number[];
+    eco: number[];
+    pol: number[];
+    labels: string[];
+  };
+  expansionCount: number;
+  isDemoActive?: boolean;
 }
 
 export const BUILDINGS: Record<BuildingType, BuildingData> = {
@@ -97,7 +110,7 @@ export const BUILDINGS: Record<BuildingType, BuildingData> = {
     ecoImpact: -20,
     powerUsage: -100, 
     description: 'Energi murah, tapi polusi parah. Hati-hati bro.',
-    emoji: '🏭',
+    emoji: '💨',
   },
   SOLAR_FARM: {
     id: 'solar_farm',
@@ -109,7 +122,7 @@ export const BUILDINGS: Record<BuildingType, BuildingData> = {
     ecoImpact: 8,
     powerUsage: -50,
     description: 'Energi bersih dari matahari. Investasi masa depan.',
-    emoji: '☀️',
+    emoji: '🛰️',
   },
   WIND_TURBINE: {
     id: 'wind_turbine',
@@ -121,7 +134,7 @@ export const BUILDINGS: Record<BuildingType, BuildingData> = {
     ecoImpact: 10,
     powerUsage: -30,
     description: 'Memanfaatkan angin untuk daya bersih.',
-    emoji: '🪁',
+    emoji: '🌬️',
   },
   NUCLEAR_PLANT: {
     id: 'nuclear_plant',
@@ -133,7 +146,7 @@ export const BUILDINGS: Record<BuildingType, BuildingData> = {
     ecoImpact: -5,
     powerUsage: -1000,
     description: 'Daya monster, risiko tinggi. Modern banget.',
-    emoji: '☢️',
+    emoji: '⚛️',
   },
   TRADITIONAL_MARKET: {
     id: 'market',
@@ -145,7 +158,7 @@ export const BUILDINGS: Record<BuildingType, BuildingData> = {
     ecoImpact: -3,
     powerUsage: 5,
     description: 'Pusat ekonomi warga. Berisik tapi cuan.',
-    emoji: '🏪',
+    emoji: '🏮',
   },
   VERTICAL_GARDEN: {
     id: 'vertical_garden',
@@ -157,7 +170,7 @@ export const BUILDINGS: Record<BuildingType, BuildingData> = {
     ecoImpact: 12,
     powerUsage: 3,
     description: 'Hutan di tengah beton. Paru-paru kota.',
-    emoji: '🌿',
+    emoji: '🎋',
   },
   TECH_STARTUP: {
     id: 'tech_startup',
@@ -169,7 +182,7 @@ export const BUILDINGS: Record<BuildingType, BuildingData> = {
     ecoImpact: -1,
     powerUsage: 40,
     description: 'Ekonomi digital, butuh banyak listrik.',
-    emoji: '🏢',
+    emoji: '💻',
   },
   SHOPPING_MALL: {
     id: 'mall',
@@ -181,7 +194,7 @@ export const BUILDINGS: Record<BuildingType, BuildingData> = {
     ecoImpact: -15,
     powerUsage: 120,
     description: 'Surga belanja, neraka bagi lingkungan.',
-    emoji: '🛍️',
+    emoji: '💎',
   },
   OFFICE_TOWER: {
     id: 'office_tower',
@@ -205,7 +218,7 @@ export const BUILDINGS: Record<BuildingType, BuildingData> = {
     ecoImpact: -2,
     powerUsage: 15,
     description: 'Hunian nyaman untuk warga barumu.',
-    emoji: '🏘️',
+    emoji: '🏢',
   },
   SMART_RESIDENCE: {
     id: 'smart_residence',
@@ -217,7 +230,7 @@ export const BUILDINGS: Record<BuildingType, BuildingData> = {
     ecoImpact: 5,
     powerUsage: 30,
     description: 'Rumah masa depan dengan panel surya terintegrasi.',
-    emoji: '🏡',
+    emoji: '🏠',
   },
   COMMUNITY_HUB: {
     id: 'community_hub',
@@ -229,7 +242,7 @@ export const BUILDINGS: Record<BuildingType, BuildingData> = {
     ecoImpact: 10,
     powerUsage: 20,
     description: 'Pusat interaksi warga di area hunian.',
-    emoji: '🏟️',
+    emoji: '🎨',
   },
   HOSPITAL: {
     id: 'hospital',
@@ -241,7 +254,7 @@ export const BUILDINGS: Record<BuildingType, BuildingData> = {
     ecoImpact: -2,
     powerUsage: 60,
     description: 'Kesehatan warga adalah investasi terbaik.',
-    emoji: '🏥',
+    emoji: '🚑',
   },
   PARK: {
     id: 'park',
@@ -253,7 +266,7 @@ export const BUILDINGS: Record<BuildingType, BuildingData> = {
     ecoImpact: 10,
     powerUsage: 2,
     description: 'Tempat santai warga biar gak stres.',
-    emoji: '🌳',
+    emoji: '⛲',
   },
   RECYCLING_CENTER: {
     id: 'recycling',
@@ -265,7 +278,7 @@ export const BUILDINGS: Record<BuildingType, BuildingData> = {
     ecoImpact: 25,
     powerUsage: 30,
     description: 'Mengubah limbah menjadi berkah.',
-    emoji: '♻️',
+    emoji: '🚮',
   },
   POLICE_STATION: {
     id: 'police',
@@ -277,7 +290,7 @@ export const BUILDINGS: Record<BuildingType, BuildingData> = {
     ecoImpact: 0,
     powerUsage: 40,
     description: 'Keamanan warga prioritas utama.',
-    emoji: '👮',
+    emoji: '🚔',
   },
   UNIVERSITY: {
     id: 'university',
@@ -289,7 +302,7 @@ export const BUILDINGS: Record<BuildingType, BuildingData> = {
     ecoImpact: 5,
     powerUsage: 150,
     description: 'Mencetak generasi cerdas dan hijau.',
-    emoji: '🎓',
+    emoji: '📚',
   },
   ECO_STADIUM: {
     id: 'stadium',
@@ -301,7 +314,7 @@ export const BUILDINGS: Record<BuildingType, BuildingData> = {
     ecoImpact: 2,
     powerUsage: 250,
     description: 'Hiburan megah bertenaga surya.',
-    emoji: '🏟️',
+    emoji: '⚽',
   },
   MOSQUE: {
     id: 'mosque',
@@ -313,7 +326,7 @@ export const BUILDINGS: Record<BuildingType, BuildingData> = {
     ecoImpact: 15,
     powerUsage: 10,
     description: 'Pusat spiritual dan ketenangan warga.',
-    emoji: '🕌',
+    emoji: '📿',
   },
   CHURCH: {
     id: 'church',
@@ -325,7 +338,7 @@ export const BUILDINGS: Record<BuildingType, BuildingData> = {
     ecoImpact: 15,
     powerUsage: 10,
     description: 'Kedamaian dalam harmoni komunitas.',
-    emoji: '⛪',
+    emoji: '🔔',
   },
   TEMPLE: {
     id: 'temple',
@@ -337,7 +350,7 @@ export const BUILDINGS: Record<BuildingType, BuildingData> = {
     ecoImpact: 15,
     powerUsage: 10,
     description: 'Keseimbangan batin dan alam.',
-    emoji: '🛕',
+    emoji: '☯️',
   },
   FIRE_STATION: {
     id: 'fire_station',
@@ -349,7 +362,7 @@ export const BUILDINGS: Record<BuildingType, BuildingData> = {
     ecoImpact: 0,
     powerUsage: 20,
     description: 'Layanan darurat siaga 24 jam.',
-    emoji: '🚒',
+    emoji: '🧑‍🚒',
   },
   CAR_DEALER: {
     id: 'car_dealer',
@@ -361,7 +374,7 @@ export const BUILDINGS: Record<BuildingType, BuildingData> = {
     ecoImpact: -30,
     powerUsage: 40,
     description: 'Pusat otomotif gaya hidup.',
-    emoji: '🏎️',
+    emoji: '🚘',
   },
   RESIDENTIAL_GRID_CONTROLLER: {
     id: 'res_grid',
@@ -373,7 +386,43 @@ export const BUILDINGS: Record<BuildingType, BuildingData> = {
     ecoImpact: 5,
     powerUsage: 10,
     description: 'Optimasi distribusi daya untuk area hunian.',
-    emoji: '🎮',
+    emoji: '🕹️',
+  },
+  MAYOR_OFFICE: {
+    id: 'mayor_office',
+    type: 'MAYOR_OFFICE',
+    category: 'PUBLIC_SERVICE',
+    name: 'Kantor Walikota',
+    cost: 5000,
+    income: 200,
+    ecoImpact: 0,
+    powerUsage: 100,
+    description: 'Pusat pemerintahan kota. Tempat warga menyampaikan aspirasi.',
+    emoji: '🗝️',
+  },
+  GOVERNOR_OFFICE: {
+    id: 'governor_office',
+    type: 'GOVERNOR_OFFICE',
+    category: 'PUBLIC_SERVICE',
+    name: 'Kantor Gubernur',
+    cost: 15000,
+    income: 500,
+    ecoImpact: 5,
+    powerUsage: 250,
+    description: 'Pusat kebijakan regional. Megah dan berwibawa.',
+    emoji: '📜',
+  },
+  PARLIAMENT: {
+    id: 'parliament',
+    type: 'PARLIAMENT',
+    category: 'PUBLIC_SERVICE',
+    name: 'Gedung DPR',
+    cost: 25000,
+    income: 1000,
+    ecoImpact: -5,
+    powerUsage: 500,
+    description: 'Tempat wakil rakyat bersidang. Simbol demokrasi.',
+    emoji: '⚖️',
   },
 };
 
@@ -389,3 +438,27 @@ export const INITIAL_ACHIEVEMENTS: Achievement[] = [
   { id: 'build_2', title: 'Pembangun Pro', description: 'Bangun 25 gedung', target: 25, current: 0, reward: 2000, completed: false, claimed: false, type: 'BUILDINGS' },
   { id: 'build_3', title: 'Master Planner', description: 'Bangun 50 gedung', target: 50, current: 0, reward: 5000, completed: false, claimed: false, type: 'BUILDINGS' },
 ];
+
+export interface Quest {
+  id: string;
+  title: string;
+  description: string;
+  target: number;
+  progress: number;
+  rewardExp: number;
+  rewardMoney: number;
+  isCompleted: boolean;
+  type: 'POPULATION' | 'MONEY' | 'BUILDINGS' | 'ECO';
+}
+
+export interface MapData {
+  id: string;
+  name: string;
+  levelRequired: number;
+  gridSize: number;
+  description: string;
+  color: string;
+  gridBg?: string;
+  gridBorder?: string;
+  cellBg?: string;
+}

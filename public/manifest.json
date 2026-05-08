@@ -1,0 +1,17 @@
+{
+  "name": "City Architect AI",
+  "short_name": "CityAI",
+  "description": "Build and manage your AI-powered city.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#09090b",
+  "theme_color": "#10b981",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/5110/5110593.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

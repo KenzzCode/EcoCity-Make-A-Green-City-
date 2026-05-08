@@ -13,8 +13,11 @@ export const loginWithGoogle = async () => {
   try {
     const result = await signInWithPopup(auth, provider);
     return result.user;
-  } catch (error) {
-    console.error("Login failed", error);
+  } catch (error: any) {
+    console.error("Firebase Login Error:", error.code, error.message);
+    if (error.code === 'auth/unauthorized-domain') {
+      console.error("Vercel/Custom Domain not authorized. Add it in Firebase Console > Auth > Settings > Authorized Domains.");
+    }
     throw error;
   }
 };
