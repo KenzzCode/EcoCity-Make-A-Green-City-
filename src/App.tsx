@@ -23,7 +23,10 @@ import {
   Save,
   LogOut,
   Settings,
-  Check
+  Check,
+  Volume2,
+  VolumeX,
+  Activity
 } from 'lucide-react';
 import { 
   LineChart, 
@@ -34,12 +37,68 @@ import {
   Tooltip, 
   ResponsiveContainer,
   AreaChart,
-  Area
+  Area,
+  PieChart,
+  Pie,
+  Cell as RechartsCell
 } from 'recharts';
-import { BUILDINGS, BuildingType, GameState, PlacedBuilding, BUILDINGS as BuildingDataMap, BuildingData, INITIAL_ACHIEVEMENTS, Achievement } from './types';
+import { BUILDINGS, BuildingType, GameState, PlacedBuilding, BUILDINGS as BuildingDataMap, BuildingData, INITIAL_ACHIEVEMENTS, Achievement, BuildingCategory } from './types';
 import { getCombinedAIContent } from './services/geminiService';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { auth, db, loginWithGoogle, logout } from './lib/firebase';
+import { onAuthStateChanged, User } from 'firebase/auth';
+import { doc, getDoc, setDoc, onSnapshot, Unsubscribe } from 'firebase/firestore';
+import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
+
+// --- Error Handling ---
+
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+    tenantId?: string | null;
+    providerInfo?: {
+      providerId?: string | null;
+      email?: string | null;
+    }[];
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData?.map(provider => ({
+        providerId: provider.providerId,
+        email: provider.email,
+      })) || []
+    },
+    operationType,
+    path
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -47,97 +106,369 @@ function cn(...inputs: ClassValue[]) {
 
 // --- Components ---
 
-const StatCard = ({ label, value, icon: Icon, color, suffix = "" }: { label: string, value: number | string, icon: any, color: string, suffix?: string }) => (
-  <div className="bg-zinc-900/50 border border-zinc-800 p-3 rounded-xl flex items-center gap-3 backdrop-blur-md">
-    <div className={cn("p-2 rounded-lg", color)}>
-      <Icon size={18} className="text-white" />
+const StatCard = ({ label, value, icon: Icon, color, suffix = "", subValue }: { label: string, value: number | string, icon: any, color: string, suffix?: string, subValue?: string }) => (
+  <div className="bg-zinc-950/20 border border-white/10 p-2.5 px-3.5 rounded-2xl flex items-center gap-3 backdrop-blur-2xl shadow-[0_8px_32px_-8px_rgba(0,0,0,0.5)] relative overflow-hidden group min-w-[130px] transition-all hover:bg-zinc-900/40 hover:border-emerald-500/30">
+    <div className={cn("p-2 rounded-xl shrink-0 shadow-lg", color)}>
+      <Icon size={14} className="text-white" />
     </div>
-    <div>
-      <p className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold">{label}</p>
-      <p className="text-lg font-mono font-bold text-white">{value}{suffix}</p>
+    <div className="z-10 min-w-0">
+      <p className="text-[7px] uppercase tracking-[0.25em] text-zinc-500 font-black truncate mb-1">{label}</p>
+      <div className="flex items-baseline gap-1">
+        <p className="text-sm font-mono font-black text-white tracking-tight leading-none">{value}{suffix}</p>
+        {subValue && <span className="text-[8px] text-zinc-500 font-mono italic opacity-60">{subValue}</span>}
+      </div>
     </div>
+    <div className="absolute top-0 right-0 w-12 h-12 bg-white/5 rounded-full blur-2xl -mr-6 -mt-6 group-hover:bg-emerald-500/10 transition-colors" />
   </div>
 );
 
 const BuildingItem = ({ type, data, onSelect, disabled, isSelected }: any) => {
   return (
     <motion.button
-      whileHover={{ scale: 1.02 }}
+      whileHover={{ scale: 1.02, x: 4 }}
       whileTap={{ scale: 0.98 }}
       onClick={() => onSelect(type as BuildingType)}
       disabled={disabled}
       className={cn(
-        "w-full p-3 rounded-xl border transition-all flex flex-col gap-2 relative overflow-hidden group",
-        isSelected ? "border-emerald-500 bg-emerald-500/10" : "border-zinc-800 bg-zinc-900/30 hover:border-zinc-600",
-        disabled && "opacity-50 grayscale cursor-not-allowed"
+        "w-full p-3.5 rounded-2xl border transition-all flex flex-col gap-2.5 relative overflow-hidden group",
+        isSelected 
+          ? "border-emerald-500 bg-emerald-500/15 shadow-[0_0_20px_rgba(16,185,129,0.15)] ring-1 ring-emerald-500/50" 
+          : "border-white/5 bg-zinc-900/30 hover:border-white/20 hover:bg-zinc-900/50",
+        disabled && "opacity-30 grayscale cursor-not-allowed border-zinc-800"
       )}
     >
-      <div className="flex justify-between items-start">
-        <span className="text-2xl">{data.emoji}</span>
-        <span className="font-mono text-xs font-bold text-emerald-400">${data.cost}</span>
+      <div className="flex justify-between items-center relative z-10">
+        <div className="w-10 h-10 bg-zinc-800/80 rounded-xl flex items-center justify-center text-2xl shadow-inner group-hover:scale-110 transition-transform">
+          {data.emoji}
+        </div>
+        <div className="text-right">
+          <p className="text-[10px] font-black font-mono text-emerald-400 leading-none">${data.cost}</p>
+          <div className="flex gap-1 mt-1 justify-end">
+            <div className={cn("w-1 h-1 rounded-full", data.ecoImpact > 0 ? "bg-emerald-500" : "bg-rose-500")} />
+            <div className="w-1 h-1 rounded-full bg-amber-500" />
+          </div>
+        </div>
       </div>
-      <div className="text-left">
-        <p className="font-bold text-sm text-zinc-200">{data.name}</p>
-        <p className="text-[10px] text-zinc-500 line-clamp-1">{data.description}</p>
+      <div className="text-left relative z-10">
+        <p className="font-black text-xs text-white uppercase tracking-wider">{data.name}</p>
+        <p className="text-[9px] text-zinc-500 line-clamp-1 mt-0.5 font-medium italic">"{data.description}"</p>
       </div>
-      <div className="flex gap-2 mt-1">
-        <span className={cn("text-[9px] px-1.5 rounded bg-zinc-800", data.ecoImpact > 0 ? "text-emerald-400" : "text-rose-400")}>
-          Eco: {data.ecoImpact > 0 ? "+" : ""}{data.ecoImpact}
-        </span>
-        <span className="text-[9px] px-1.5 rounded bg-zinc-800 text-amber-400">
-          In: +${data.income}
-        </span>
+      
+      {/* Decorative back-element */}
+      <div className="absolute -right-4 -bottom-4 text-4xl opacity-[0.03] group-hover:opacity-[0.08] transition-all rotate-12">
+        {data.emoji}
       </div>
     </motion.button>
   );
 };
 
+// --- Game Logic Helpers ---
+
+const calculateBankruptcyRisk = (state: GameState): number => {
+  let risk = 0;
+  if (state.money < 0) risk += 40;
+  if (state.ecoHealth < 20) risk += 30;
+  if (state.pollution > 80) risk += 20;
+  if (state.taxRate > 25) risk += (state.taxRate - 25) * 2;
+  return Math.min(100, risk);
+};
+
 // --- Main App ---
+
+const TRANSLATIONS = {
+  id: {
+    money: "Uang",
+    eco: "Nature",
+    pollution: "Polusi",
+    citizens: "Warga",
+    construction: "Konstruksi",
+    bulldoze: "Hancurkan",
+    taxRate: "Sistem Pajak",
+    expand: "Perluas",
+    shrink: "Kecilkan",
+    advisor: "Diagnostic Center",
+    scan: "Pindai",
+    settings: "Pengaturan",
+    welcome: "Selamat Datang di EcoCity Balance!",
+    startNew: "Mulai Kota Baru",
+    continue: "Lanjutkan Membangun",
+    ecoAdvisor: "Pusat Analisa Lingkungan",
+    syncing: "Sinkronisasi...",
+    loggedAs: "Masuk Sebagai",
+    newsDefault: ["Selamat datang di EcoCity!", "Masuk untuk simpan data di cloud."]
+  },
+  en: {
+    money: "Money",
+    eco: "Eco",
+    pollution: "Pollution",
+    citizens: "Citizens",
+    construction: "Construction",
+    bulldoze: "Bulldoze",
+    taxRate: "Tax System",
+    expand: "Expand",
+    shrink: "Shrink",
+    advisor: "Diagnostic Center",
+    scan: "Scan",
+    settings: "Settings",
+    welcome: "Welcome to EcoCity Balance!",
+    startNew: "Start New City",
+    continue: "Continue Building",
+    ecoAdvisor: "Eco-Analysis Center",
+    syncing: "Syncing...",
+    loggedAs: "Logged in As",
+    newsDefault: ["Welcome to EcoCity!", "Log in to save your data."]
+  },
+  ar: {
+    money: "المال",
+    eco: "البيئة",
+    pollution: "التلوث",
+    citizens: "المواطنون",
+    construction: "البناء",
+    bulldoze: "هدم",
+    taxRate: "نظام الضرائب",
+    expand: "توسيع",
+    shrink: "تصغير",
+    advisor: "مركز التشخيص",
+    scan: "فحص",
+    settings: "الإعدادات",
+    welcome: "مرحباً بكم في إيكو سيتي!",
+    startNew: "بدء مدينة جديدة",
+    continue: "مواصلة البناء",
+    ecoAdvisor: "مركز التحليل البيئي",
+    syncing: "جاري المزامنة...",
+    loggedAs: "مسجل كـ",
+    newsDefault: ["مرحباً بكم في إيكو سيتي!", "سجل الدخول لحفظ البيانات."]
+  }
+};
 
 const INITIAL_STATE: GameState = {
   money: 1000,
   ecoHealth: 80,
   pollution: 20,
   population: 50,
+  taxRate: 15,
+  bankruptcyRisk: 0,
   buildings: [],
-  gridSize: 6,
+  gridSize: 4,
   achievements: INITIAL_ACHIEVEMENTS,
   theme: 'dark',
+  language: 'id',
+  gameSpeed: 1,
   history: []
 };
 
 export default function App() {
-  const [state, setState] = useState<GameState>(() => {
-    const saved = localStorage.getItem('ecocity_save');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        console.error("Failed to parse save", e);
-      }
-    }
-    return INITIAL_STATE;
-  });
+  const [user, setUser] = useState<User | null>(null);
+  const prevUserRef = useRef<User | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [hasSynced, setHasSynced] = useState(false);
+  const [state, setState] = useState<GameState>(INITIAL_STATE);
 
-  const [news, setNews] = useState<string[]>(["Welcome to your EcoCity!", "Mulai membangun untuk masa depan hijau."]);
-  const [advisorMsg, setAdvisorMsg] = useState<string>("Ready to build, Boss?");
+  useEffect(() => {
+    let unsubSnapshot: Unsubscribe | null = null;
+
+    const unsubAuth = onAuthStateChanged(auth, (u) => {
+      const wasLoggedIn = !!prevUserRef.current;
+      setUser(u);
+      setHasSynced(false);
+      
+      // Clear previous snapshot listener
+      if (unsubSnapshot) {
+        unsubSnapshot();
+        unsubSnapshot = null;
+      }
+
+      if (u) {
+        setIsSyncing(true);
+        const ref = doc(db, 'cities', u.uid);
+        unsubSnapshot = onSnapshot(ref, (docSnap) => {
+          if (docSnap.exists()) {
+            const data = docSnap.data();
+            setState({
+              ...INITIAL_STATE,
+              ...data,
+              buildings: data.buildings || [],
+              achievements: data.achievements || INITIAL_ACHIEVEMENTS,
+              history: data.history || []
+            } as GameState);
+          }
+          setIsSyncing(false);
+          setHasSynced(true);
+        }, (error) => {
+          handleFirestoreError(error, OperationType.GET, `cities/${u.uid}`);
+          setIsSyncing(false);
+          setHasSynced(true);
+        });
+      } else {
+        // If they just logged out, reset. If it's just initial load, try to load local.
+        if (wasLoggedIn) {
+          setState(INITIAL_STATE);
+          localStorage.removeItem('ecocity_save_v2');
+        } else {
+          const saved = localStorage.getItem('ecocity_save_v2');
+          if (saved) {
+            try {
+              setState(JSON.parse(saved));
+            } catch (e) {
+              console.error("Local load failed", e);
+            }
+          }
+        }
+        setHasSynced(true);
+      }
+      prevUserRef.current = u;
+    });
+
+    return () => {
+      unsubAuth();
+      if (unsubSnapshot) unsubSnapshot();
+    };
+  }, []);
+
+  const saveToCloud = useCallback(async (newState: GameState) => {
+    if (!user) return;
+    try {
+      await setDoc(doc(db, 'cities', user.uid), {
+        ...newState,
+        userId: user.uid,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+    } catch (e) {
+      handleFirestoreError(e, OperationType.WRITE, `cities/${user.uid}`);
+    }
+  }, [user]);
+
+  const [news, setNews] = useState<string[]>(["Welcome to EcoCity Balance!", "Log in to save your progress."]);
+  const [advisorMsg, setAdvisorMsg] = useState<string>("Ready to build, Manager?");
   const [isGameStarted, setIsGameStarted] = useState(false);
   const [selectedBuilding, setSelectedBuilding] = useState<BuildingType | null>(null);
+  const [selectedCategory, setSelectedCategory] = useState<BuildingCategory>('ENERGY');
   const [isDeleteMode, setIsDeleteMode] = useState(false);
   const [movingBuilding, setMovingBuilding] = useState<PlacedBuilding | null>(null);
   const [isGamePaused, setIsGamePaused] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [lastSaveTime, setLastSaveTime] = useState<number>(Date.now());
+  const [isMusicPlaying, setIsMusicPlaying] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [notifications, setNotifications] = useState<{id: string, text: string, type: 'protest' | 'info'}[]>([]);
 
-  // Autosave
+  const t = TRANSLATIONS[state.language || 'id'];
+
+  // Realistic Metrics Fluctuations (Visual only)
+  const [metricJitter, setMetricJitter] = useState(0);
   useEffect(() => {
-    if (!isGameStarted) return;
     const interval = setInterval(() => {
-      localStorage.setItem('ecocity_save', JSON.stringify(state));
-      setLastSaveTime(Date.now());
-    }, 10000); // Every 10s
+      setMetricJitter(Math.random() * 0.05 - 0.025);
+    }, 800);
     return () => clearInterval(interval);
-  }, [state, isGameStarted]);
+  }, []);
+
+  const [newsIndex, setNewsIndex] = useState(0);
+  const getDynamicNews = () => {
+    const list = [...t.newsDefault];
+    if (user) {
+      if (state.language === 'id') {
+        list.push(`Status: Terhubung ke EcoCloud (${user.email})`);
+        if (state.ecoHealth < 50) list.push("DARURAT: Kualitas udara memburuk di sektor pusat!");
+        if (state.taxRate > 25) list.push("Laporan: Warga mulai mengeluhkan biaya hidup tinggi.");
+        if (state.population > 500) list.push("Headline: EcoCity menjadi destinasi hunian terpopuler tahun ini!");
+      } else if (state.language === 'ar') {
+        list.push(`الحالة: متصل بالسحابة (${user.email})`);
+      } else {
+        list.push(`Status: Cloud Synced (${user.email})`);
+        if (state.ecoHealth < 50) list.push("ALERT: Air quality dropping in central sector!");
+        if (state.population > 500) list.push("Flash: EcoCity named top sustainable destination!");
+      }
+    }
+    return list;
+  };
+  
+  const newsList = getDynamicNews();
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setNewsIndex(prev => (prev + 1) % newsList.length);
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [newsList.length]);
+
+  const toggleLanguage = () => {
+    setState(prev => {
+      const langs: ('id' | 'en' | 'ar')[] = ['id', 'en', 'ar'];
+      const nextIdx = (langs.indexOf(prev.language || 'id') + 1) % langs.length;
+      return { ...prev, language: langs[nextIdx] };
+    });
+  };
+
+  useEffect(() => {
+    if (isGameStarted && !isMusicPlaying) {
+      setIsMusicPlaying(true);
+    }
+  }, [isGameStarted, isMusicPlaying]);
+
+  useEffect(() => {
+    if (isMusicPlaying) {
+      if (!audioRef.current) {
+        audioRef.current = new Audio('https://assets.mixkit.co/music/preview/mixkit-chill-step-loop-454.mp3');
+        audioRef.current.loop = true;
+        audioRef.current.volume = 0;
+        audioRef.current.play().catch(e => console.log("User interaction needed for audio"));
+        
+        // Smooth fade in
+        let vol = 0;
+        const interval = setInterval(() => {
+          if (audioRef.current && vol < 0.25) {
+            vol += 0.01;
+            audioRef.current.volume = vol;
+          } else {
+            clearInterval(interval);
+          }
+        }, 150);
+      } else {
+        audioRef.current.play().catch(e => console.log("Audio play blocked"));
+      }
+    } else {
+      audioRef.current?.pause();
+    }
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+      }
+    };
+  }, [isMusicPlaying]);
+
+  // Random Protests
+  useEffect(() => {
+    if (!isGameStarted || isGamePaused) return;
+    const interval = setInterval(() => {
+      const chance = Math.random();
+      if (chance < 0.15) { // 15% chance every 25s
+        let protest = "";
+        if (state.pollution > 40) protest = state.language === 'ar' ? "المواطنون يحتجون على التلوث!" : "Warga memprotes tingkat polusi!";
+        else if (state.money < 100) protest = state.language === 'ar' ? "المواطنون قلقون من الوضع المالي!" : "Warga khawatir krisis ekonomi!";
+        else if (state.taxRate > 25) protest = state.language === 'ar' ? "تظاهرات ضد الضرائب المرتفعة!" : "Demonstrasi menolak pajak tinggi!";
+        
+        if (protest) {
+          const id = Math.random().toString(36).substr(2, 9);
+          setNotifications(prev => [...prev, { id, text: protest, type: 'protest' }]);
+          setTimeout(() => {
+            setNotifications(prev => prev.filter(n => n.id !== id));
+          }, 6000);
+        }
+      }
+    }, 25000);
+    return () => clearInterval(interval);
+  }, [isGameStarted, isGamePaused, state.pollution, state.money, state.taxRate, state.language]);
+
+  // Autosave & Sync
+  useEffect(() => {
+    if (!isGameStarted || !hasSynced) return;
+    const interval = setInterval(() => {
+      localStorage.setItem('ecocity_save_v2', JSON.stringify(state));
+      if (user) saveToCloud(state);
+      setLastSaveTime(Date.now());
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [state, isGameStarted, user, saveToCloud, hasSynced]);
 
   // Derived Grid
   const grid = Array(state.gridSize).fill(null).map(() => Array(state.gridSize).fill(null));
@@ -149,7 +480,7 @@ export default function App() {
 
   // Game Loop
   useEffect(() => {
-    if (isGamePaused) return;
+    if (isGamePaused || !isGameStarted) return;
 
     const interval = setInterval(() => {
       setState(prev => {
@@ -160,32 +491,42 @@ export default function App() {
 
         prev.buildings.forEach(b => {
           const data = BuildingDataMap[b.type];
-          if (!data) return; // Skip buildings that no longer exist in definitions (like ROAD)
+          if (!data) return;
           income += data.income;
-          ecoDelta += data.ecoImpact / 10; // Slow change
-          polDelta -= data.ecoImpact / 10;
-          popDelta += (data.type === 'APARTMENT' ? 10 : 2);
+          ecoDelta += data.ecoImpact / 20;
+          polDelta -= data.ecoImpact / 20;
+          popDelta += (data.category === 'RESIDENTIAL' ? 15 : 2);
         });
 
-        // Natural decay/regrowth
-        ecoDelta += prev.ecoHealth < 50 ? -0.1 : 0.05;
+        // Natural decay
+        ecoDelta += prev.ecoHealth < 40 ? -0.2 : 0.08;
         
-        const newMoney = prev.money + income;
+        // Tax Collection Logic
+        const taxPower = (income * prev.taxRate) / 50; 
+        const totalIncome = income + taxPower;
+        
+        const newMoney = prev.money + totalIncome;
         const newEco = Math.max(0, Math.min(100, prev.ecoHealth + ecoDelta));
         const newPol = Math.max(0, Math.min(100, prev.pollution + polDelta));
         const newPop = Math.max(0, prev.population + popDelta);
+        const newRisk = calculateBankruptcyRisk({ ...prev, money: newMoney, ecoHealth: newEco, pollution: newPol });
+
+        // GameOver Check
+        if (newRisk >= 100) {
+          setNews(["CITY BANKRUPT!", "Your management has failed. Try again."]);
+          setIsGamePaused(true);
+        }
 
         const newHistory = [...prev.history, { 
           time: prev.history.length, 
           money: newMoney, 
           pollution: newPol, 
           ecoHealth: newEco 
-        }].slice(-20);
+        }].slice(-30);
 
         // Achievement Checks
         const updatedAchievements = prev.achievements.map(ach => {
           if (ach.completed) return ach;
-          
           let currentValue = 0;
           switch (ach.type) {
             case 'POPULATION': currentValue = newPop; break;
@@ -193,10 +534,7 @@ export default function App() {
             case 'ECO': currentValue = newEco; break;
             case 'BUILDINGS': currentValue = prev.buildings.length; break;
           }
-
-          if (currentValue >= ach.target) {
-            return { ...ach, current: currentValue, completed: true };
-          }
+          if (currentValue >= ach.target) return { ...ach, current: currentValue, completed: true };
           return { ...ach, current: currentValue };
         });
 
@@ -206,14 +544,15 @@ export default function App() {
           ecoHealth: newEco,
           pollution: newPol,
           population: newPop,
+          bankruptcyRisk: newRisk,
           achievements: updatedAchievements,
           history: newHistory
         };
       });
-    }, 2000);
+    }, 2000 / (state.gameSpeed || 1));
 
     return () => clearInterval(interval);
-  }, [isGamePaused, state.buildings.length]);
+  }, [isGamePaused, isGameStarted, state.buildings.length, state.gameSpeed]);
 
   const stateRef = useRef(state);
   useEffect(() => {
@@ -332,25 +671,6 @@ export default function App() {
     }));
   };
 
-  const minimizeGrid = () => {
-    if (state.gridSize <= 4) {
-      alert("Grid sudah ukuran minimum!");
-      return;
-    }
-    
-    // Check if any buildings are in the area being removed
-    const hasBuildingsInEdge = state.buildings.some(b => b.x >= state.gridSize - 1 || b.y >= state.gridSize - 1);
-    if (hasBuildingsInEdge) {
-      if (!confirm("Beberapa gedung di pinggir area akan terhapus. Lanjutkan?")) return;
-    }
-
-    setState(prev => ({
-      ...prev,
-      gridSize: prev.gridSize - 1,
-      buildings: prev.buildings.filter(b => b.x < prev.gridSize - 1 && b.y < prev.gridSize - 1)
-    }));
-  };
-
   const deleteBuilding = (id: string) => {
     setState(prev => ({
       ...prev,
@@ -389,6 +709,21 @@ export default function App() {
     // Visual feedback could be added here
   };
 
+  const handleLogin = async () => {
+    try {
+      await loginWithGoogle();
+    } catch (error: any) {
+      if (error.code === 'auth/popup-closed-by-user') {
+        setNews(["Login cancelled.", "Akses ditutup oleh user. Coba lagi jika ingin sinkronisasi awan."]);
+      } else if (error.code === 'auth/cancelled-popup-request') {
+        console.warn("Multiple popups attempted.");
+      } else {
+        console.error("Login failed", error);
+        setNews(["Login Error", "Terjadi kesalahan saat masuk. Silakan coba lagi."]);
+      }
+    }
+  };
+
   return (
     <div className={cn(
       "h-screen flex flex-col font-sans selection:bg-emerald-500/30 overflow-hidden transition-colors duration-500",
@@ -396,43 +731,113 @@ export default function App() {
     )}>
       {/* Top Header / Stats - Fixed Height */}
       <div className={cn(
-        "h-20 border-b z-50 shrink-0 flex items-center",
-        state.theme === 'dark' ? "bg-zinc-950 border-zinc-800" : "bg-white border-zinc-200"
+        "h-20 z-50 shrink-0 flex items-center px-6 relative",
+        state.theme === 'dark' ? "bg-black/40 border-b border-white/5" : "bg-white/40 border-b border-zinc-200"
       )}>
-        <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
+        <div className="w-full max-w-[1800px] mx-auto flex items-center justify-between gap-6">
           <motion.button 
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
             onClick={() => setIsGameStarted(false)}
             className="flex items-center gap-3 cursor-pointer group"
           >
-            <div className="w-10 h-10 bg-emerald-500 rounded-lg flex items-center justify-center shadow-[0_0_20px_rgba(16,185,129,0.3)] group-hover:shadow-emerald-500/50 transition-all">
-              <Leaf size={24} className="text-black" />
+            <div className="w-11 h-11 bg-emerald-500 rounded-2xl flex items-center justify-center shadow-[0_0_30px_-5px_rgba(16,185,129,0.5)] group-hover:shadow-emerald-500/60 transition-all relative overflow-hidden">
+              <Leaf size={22} className="text-black relative z-10" />
+              <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent" />
             </div>
-            <div className="hidden sm:block text-left">
-              <h1 className="font-bold text-xl tracking-tight">EcoCity</h1>
-              <p className="text-[10px] text-emerald-500 font-mono flex items-center gap-1 uppercase tracking-tighter">
-                <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" /> Live Balance
-              </p>
+            <div className="hidden lg:block text-left">
+              <h1 className="font-black text-xl tracking-tighter leading-none text-white">ECO<span className="text-emerald-500">CITY</span></h1>
+              <div className="flex items-center gap-1.5 mt-1">
+                <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(16,185,129,1)]" />
+                <p className="text-[8px] text-emerald-500 font-black uppercase tracking-[0.3em]">Operational</p>
+              </div>
             </div>
           </motion.button>
 
-          <div className="flex items-center gap-2">
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 mr-2">
-              <StatCard label="Uang" value={state.money.toLocaleString()} color="bg-amber-500" icon={DollarSign} suffix="$" />
-              <StatCard label="Eco" value={state.ecoHealth.toFixed(0)} color="bg-emerald-500" icon={TrendingUp} suffix="%" />
-              <StatCard label="Polusi" value={state.pollution.toFixed(0)} color="bg-rose-500" icon={Wind} suffix="%" />
-              <StatCard label="Warga" value={state.population.toLocaleString()} color="bg-indigo-500" icon={Users} />
+          {/* Floating Bubble Advisor */}
+          <div className="hidden md:flex flex-1 justify-center px-10">
+            <motion.div 
+              key={advisorMsg}
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ type: "spring", stiffness: 400, damping: 25 }}
+              className={cn(
+                "px-6 py-2 rounded-full border flex items-center gap-4 shadow-2xl relative",
+                state.theme === 'dark' ? "bg-zinc-900 border-emerald-500/30" : "bg-white border-emerald-200"
+              )}
+            >
+              {/* Bubble Tail */}
+              <div className={cn(
+                "absolute -bottom-2 left-1/2 -translate-x-1/2 w-4 h-4 rotate-45 border-r border-b",
+                state.theme === 'dark' ? "bg-zinc-900 border-emerald-500/30" : "bg-white border-emerald-200"
+              )} />
+
+              <div className="relative">
+                <div className="w-3 h-3 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_10px_rgba(16,185,129,1)]" />
+                <div className="absolute inset-0 bg-emerald-500 rounded-full animate-ping opacity-30" />
+              </div>
+              <p className="text-xs font-bold text-zinc-300 max-w-[400px] truncate">
+                {isAiLoading ? "Syncing..." : advisorMsg}
+              </p>
+              <button 
+                 onClick={() => fetchAIContent(true)}
+                 className="p-1 px-2.5 bg-emerald-500 text-black rounded-full text-[9px] font-black uppercase tracking-tighter hover:scale-105 transition-all"
+              >
+                Scan
+              </button>
+              
+              {/* Notifications / Protests Overlay in bubble style */}
+              <AnimatePresence>
+                {notifications.map(n => (
+                  <motion.div
+                    key={n.id}
+                    initial={{ y: 20, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    exit={{ y: -20, opacity: 0 }}
+                    className="absolute -bottom-12 left-0 right-0 bg-rose-500 text-white p-2 rounded-xl text-[10px] font-black text-center shadow-2xl border border-rose-400"
+                  >
+                    ⚠️ {n.text}
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+            </motion.div>
+          </div>
+
+          <div className="flex items-center gap-4">
+            <button 
+              onClick={toggleLanguage}
+              className={cn(
+                "p-2.5 rounded-xl border transition-all shrink-0 font-black text-[10px] uppercase tracking-widest",
+                state.theme === 'dark' ? "bg-zinc-900 border-white/5 hover:border-emerald-500/30 text-emerald-500" : "bg-white border-zinc-200 hover:border-emerald-500/30 text-emerald-600"
+              )}
+            >
+              {state.language === 'id' ? 'ID' : state.language === 'en' ? 'EN' : 'AR'}
+            </button>
+            <div className="flex gap-2 p-2 bg-white/5 rounded-3xl backdrop-blur-2xl border border-white/5 overflow-x-auto scrollbar-hide">
+              <StatCard label={t.money} value={(state.money + metricJitter).toLocaleString()} color="bg-amber-500" icon={DollarSign} suffix="$" />
+              <StatCard label={t.eco} value={(state.ecoHealth + metricJitter).toFixed(2)} color="bg-emerald-500" icon={TrendingUp} suffix="%" />
+              <StatCard label={t.pollution} value={(state.pollution + metricJitter).toFixed(2)} color="bg-rose-500" icon={Wind} suffix="%" />
+              <StatCard label={t.citizens} value={Math.floor(state.population + (metricJitter > 0 ? 1 : 0)).toLocaleString()} color="bg-indigo-500" icon={Users} />
             </div>
 
             <button 
-              onClick={() => setIsSettingsOpen(!isSettingsOpen)}
+              onClick={() => setIsMusicPlaying(!isMusicPlaying)}
               className={cn(
-                "p-3 rounded-xl border transition-all",
-                state.theme === 'dark' ? "bg-zinc-900 border-zinc-800 hover:border-zinc-600" : "bg-white border-zinc-200 hover:border-zinc-300"
+                "p-2.5 rounded-xl border transition-all shrink-0",
+                state.theme === 'dark' ? "bg-zinc-900 border-white/5 hover:border-zinc-600" : "bg-white border-zinc-200 hover:border-zinc-300",
+                isMusicPlaying ? "text-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.2)]" : "text-zinc-500"
               )}
             >
-              <Settings size={20} />
+              {isMusicPlaying ? <Volume2 size={18} /> : <VolumeX size={18} />}
+            </button>
+            <button 
+              onClick={() => setIsSettingsOpen(!isSettingsOpen)}
+              className={cn(
+                "p-2.5 rounded-xl border transition-all shrink-0",
+                state.theme === 'dark' ? "bg-zinc-900 border-white/5 hover:border-zinc-600" : "bg-white border-zinc-200 hover:border-zinc-300"
+              )}
+            >
+              <Settings size={18} />
             </button>
           </div>
         </div>
@@ -455,7 +860,48 @@ export default function App() {
               <button onClick={() => setIsSettingsOpen(false)}><Plus size={16} className="rotate-45" /></button>
             </div>
             
-            <div className="space-y-3">
+            <div className="space-y-4">
+              <div className="space-y-1">
+                <div className="flex justify-between items-center px-1">
+                  <span className="text-[10px] font-bold text-zinc-500 uppercase">Music Volume</span>
+                  <span className="text-[10px] font-mono text-emerald-500">{audioRef.current ? Math.round(audioRef.current.volume * 100) : 0}%</span>
+                </div>
+                <input 
+                  type="range"
+                  min="0" max="1" step="0.05"
+                  value={audioRef.current?.volume || 0}
+                  onChange={(e) => {
+                    if (audioRef.current) {
+                      audioRef.current.volume = parseFloat(e.target.value);
+                      setIsMusicPlaying(audioRef.current.volume > 0);
+                    }
+                  }}
+                  className="w-full accent-emerald-500 h-1 bg-zinc-800 rounded-full appearance-none cursor-pointer"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <div className="flex justify-between items-center px-1">
+                  <span className="text-[10px] font-bold text-zinc-500 uppercase">Simulation Speed</span>
+                </div>
+                <div className="flex gap-1">
+                  {[1, 2, 4].map(speed => (
+                    <button 
+                      key={speed}
+                      onClick={() => setState(prev => ({ ...prev, gameSpeed: speed }))}
+                      className={cn(
+                        "flex-1 py-1 rounded text-[10px] font-bold transition-colors",
+                        state.gameSpeed === speed ? "bg-emerald-500 text-black shadow-lg" : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
+                      )}
+                    >
+                      {speed}x
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="h-px bg-zinc-800/50" />
+
               <button onClick={toggleTheme} className="w-full flex items-center justify-between p-2 rounded-lg hover:bg-zinc-500/10 transition-colors">
                 <span className="text-sm">Theme Mode</span>
                 {state.theme === 'dark' ? <Moon size={18} className="text-amber-400" /> : <Sun size={18} className="text-amber-600" />}
@@ -483,35 +929,69 @@ export default function App() {
       {/* Main Game Area */}
       <div className="flex-1 flex flex-col lg:flex-row overflow-hidden relative">
         
-        {/* Left Sidebar: Buildings & Advisor - Independently Scrollable */}
+        {/* Left Sidebar: Buildings & Advisor - Optimized HUD Style */}
         <div className={cn(
-          "w-full lg:w-80 border-r flex flex-col shrink-0 z-40 transition-colors",
-          state.theme === 'dark' ? "bg-zinc-950 border-zinc-800" : "bg-zinc-50 border-zinc-200"
+          "w-full lg:w-80 border-r flex flex-col shrink-0 z-40 transition-all duration-500",
+          state.theme === 'dark' ? "bg-black/60 border-white/5" : "bg-zinc-50/80 border-zinc-200"
         )}>
-          {/* Menu Header - Fixed */}
-          <div className="p-4 border-b border-zinc-800/10">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-xs font-bold uppercase tracking-widest text-zinc-500">Construction</h2>
+          <div className="p-5 space-y-6">
+            <div className="flex items-center justify-between">
+              <div className="flex flex-col">
+                <h2 className="text-[9px] font-black uppercase tracking-[0.3em] text-zinc-500">{t.construction}</h2>
+                <p className="text-xs font-bold text-zinc-300 mt-1">{state.language === 'id' ? 'Gedung Ramah Lingkungan' : 'Sustainable Buildings'}</p>
+              </div>
               <button 
                 onClick={toggleDeleteMode}
                 className={cn(
-                  "p-2 rounded-lg transition-all flex items-center gap-2 border",
+                  "p-2 px-3 rounded-xl transition-all flex items-center gap-2 border shadow-lg",
                   isDeleteMode 
-                    ? "bg-rose-500 text-black border-rose-400 font-bold" 
-                    : "bg-zinc-900 text-zinc-400 border-zinc-800 hover:border-rose-500/50"
+                    ? "bg-rose-500 text-black border-rose-400 font-black text-[9px] uppercase" 
+                    : "bg-zinc-900/80 text-zinc-400 border-white/5 hover:border-rose-500/50 text-[9px] uppercase font-black"
                 )}
               >
-                <Trash2 size={14} />
-                <span className="text-[10px] uppercase">Bulldoze</span>
+                <Trash2 size={12} />
+                <span>{t.bulldoze}</span>
               </button>
+            </div>
+
+            <div className="p-4 bg-zinc-900/40 rounded-2xl border border-white/10 shadow-inner">
+               <div className="flex justify-between text-[8px] font-black uppercase text-zinc-500 mb-3 tracking-[0.2em]">
+                 <span>{t.taxRate}</span>
+                 <span className={cn(state.taxRate > 25 ? "text-rose-500" : "text-emerald-400")}>{state.taxRate}%</span>
+               </div>
+               <input 
+                 type="range" 
+                 min="0" max="50" 
+                 value={state.taxRate} 
+                 onChange={(e) => setState(prev => ({ ...prev, taxRate: parseInt(e.target.value) }))}
+                 className="w-full accent-emerald-500 h-1 bg-zinc-800 rounded-full appearance-none cursor-pointer"
+               />
+            </div>
+
+            <div className="grid grid-cols-2 gap-1.5">
+               {(['ENERGY', 'ECONOMY', 'RESIDENTIAL', 'PUBLIC_SERVICE', 'ENVIRONMENT', 'CULTURAL', 'INFRASTRUCTURE'] as BuildingCategory[]).map(cat => (
+                 <button
+                   key={cat}
+                   onClick={() => setSelectedCategory(cat)}
+                   className={cn(
+                     "px-2 py-2 rounded-xl text-[8px] font-black uppercase transition-all border text-center leading-none tracking-widest",
+                     selectedCategory === cat 
+                       ? "bg-emerald-500 text-black border-emerald-400 shadow-[0_5px_15px_rgba(16,185,129,0.3)]" 
+                       : "bg-zinc-900/40 text-zinc-500 border-white/5 hover:text-zinc-300 hover:bg-zinc-800/60"
+                   )}
+                 >
+                   {cat.split('_')[0]}
+                 </button>
+               ))}
             </div>
           </div>
 
           {/* Scrollable list */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-6">
-            <div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-1 gap-2">
-                {(Object.keys(BUILDINGS) as BuildingType[]).map(type => {
+          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            <div className="grid grid-cols-1 gap-2">
+              {(Object.keys(BUILDINGS) as BuildingType[])
+                .filter(type => BUILDINGS[type].category === selectedCategory)
+                .map(type => {
                   const bData = BuildingDataMap[type];
                   return (
                     <BuildingItem 
@@ -528,40 +1008,16 @@ export default function App() {
                     />
                   )
                 })}
-              </div>
             </div>
 
-            <div className="pb-10">
+            <div className="pb-10 pt-4 flex flex-col items-center">
                <div className={cn(
-                 "p-4 rounded-2xl relative overflow-hidden group border",
-                 state.theme === 'dark' ? "bg-emerald-950/20 border-emerald-900/50" : "bg-emerald-50 border-emerald-200"
+                 "p-5 rounded-[2rem] relative overflow-hidden group border transition-all opacity-50 backdrop-blur-sm",
+                 state.theme === 'dark' ? "bg-black/60 border-emerald-500/10" : "bg-white/40 border-emerald-200"
                )}>
-                  <div className="flex items-center justify-between gap-2 mb-2">
-                    <div className="flex items-center gap-2">
-                      <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
-                      <span className="text-[10px] font-bold uppercase text-emerald-500">Eco-Advisor AI</span>
-                    </div>
-                    <button 
-                      onClick={() => fetchAIContent(true)}
-                      disabled={isAiLoading}
-                      className={cn(
-                        "p-1.5 rounded-lg transition-all flex items-center gap-1 border",
-                        state.theme === 'dark' ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30" : "bg-white border-emerald-200 text-emerald-600 hover:bg-emerald-50"
-                      )}
-                    >
-                      <TrendingUp size={12} className={cn(isAiLoading && "animate-spin")} />
-                      <span className="text-[9px] font-bold">ANALYZE</span>
-                    </button>
-                  </div>
-                  <p className={cn(
-                    "text-sm italic font-medium leading-relaxed",
-                    state.theme === 'dark' ? "text-emerald-100" : "text-emerald-900"
-                  )}>
-                    {isAiLoading ? "Sedang menganalisa kondisi kota..." : `"${advisorMsg}"`}
+                  <p className="text-[9px] font-black italic text-zinc-500 uppercase tracking-widest text-center px-4">
+                    {state.language === 'ar' ? "نظام الذكاء الاصطناعي نشط في الأعلى" : "AI Core Active (HUD Above)"}
                   </p>
-                  <div className="absolute -right-4 -bottom-4 opacity-5 group-hover:opacity-10 transition-opacity">
-                    <Zap size={80} className="text-emerald-400" />
-                  </div>
                </div>
             </div>
           </div>
@@ -569,37 +1025,80 @@ export default function App() {
 
         {/* Center Canvas Area: City Grid - Centered and Visible */}
         <div className={cn(
-          "flex-1 relative overflow-auto flex items-center justify-center p-8 lg:p-20 transition-all duration-700",
+          "flex-1 relative overflow-auto flex items-center justify-center p-4 lg:p-8 transition-all duration-700",
           state.theme === 'dark' 
-            ? "bg-[#09090b] bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-emerald-950/10 via-zinc-950 to-black" 
-            : "bg-zinc-100 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-emerald-50/30 via-zinc-100 to-zinc-200"
+            ? "bg-[#020617] bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-emerald-950/20 via-slate-950 to-black" 
+            : "bg-zinc-100 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-emerald-50/40 via-zinc-100 to-zinc-200"
         )}>
-          {/* Decorative Background Elements */}
+          {/* Enhanced Eco-Background with Image */}
           <div className="absolute inset-0 overflow-hidden pointer-events-none">
-            <div className={cn(
-              "absolute top-1/4 left-1/4 w-[500px] h-[500px] rounded-full blur-[120px] opacity-20",
-              state.theme === 'dark' ? "bg-emerald-500/20" : "bg-emerald-500/10"
-            )} />
-            <div className={cn(
-              "absolute bottom-1/4 right-1/4 w-[400px] h-[400px] rounded-full blur-[100px] opacity-20",
-              state.theme === 'dark' ? "bg-blue-500/10" : "bg-blue-500/5"
-            )} />
+            <div className="absolute inset-0 opacity-20">
+               <img 
+                 src="https://images.unsplash.com/photo-1518005020250-675f042d3858?auto=format&fit=crop&q=80&w=2000" 
+                 alt="Background" 
+                 className="w-full h-full object-cover grayscale brightness-50 contrast-125"
+               />
+            </div>
+            <div className="absolute inset-0 bg-gradient-to-br from-black/80 via-black/40 to-black/80" />
+            
+            {/* Biological Mesh Grid */}
+            <div className="absolute inset-0 opacity-[0.03]" 
+                 style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, #10b981 1px, transparent 0)', backgroundSize: '40px 40px' }} />
+            
+            {/* Moving Light Beams */}
+            <motion.div 
+              animate={{ 
+                x: [-100, 100],
+                opacity: [0.1, 0.3, 0.1]
+              }}
+              transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
+              className="absolute top-0 bottom-0 w-32 bg-emerald-500/10 blur-[80px] -skew-x-12"
+              style={{ left: '30%' }}
+            />
+
+            {[...Array(12)].map((_, i) => (
+              <motion.div
+                key={i}
+                animate={{
+                  y: [0, -200, 0],
+                  x: [0, i % 2 === 0 ? 80 : -80, 0],
+                  opacity: [0, 0.4, 0],
+                  scale: [0.5, 1.2, 0.5]
+                }}
+                transition={{
+                  duration: 20 + i * 3,
+                  repeat: Infinity,
+                  ease: "easeInOut",
+                  delay: i * 2
+                }}
+                className="absolute w-1 h-1 bg-emerald-400/40 rounded-full blur-[2px]"
+                style={{
+                  left: `${(i * 9) % 100}%`,
+                  bottom: `${-5}%`
+                }}
+              />
+            ))}
           </div>
 
-          {/* Grid Blueprint Pattern */}
-          <div className="absolute inset-0 opacity-[0.4] pointer-events-none" 
-               style={{ 
-                 backgroundImage: state.theme === 'dark' 
-                  ? 'radial-gradient(rgba(16, 185, 129, 0.1) 1px, transparent 1px), linear-gradient(to right, rgba(255,255,255,0.02) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.02) 1px, transparent 1px)' 
-                  : 'radial-gradient(rgba(16, 185, 129, 0.15) 1px, transparent 1px), linear-gradient(to right, rgba(0,0,0,0.02) 1px, transparent 1px), linear-gradient(to bottom, rgba(0,0,0,0.02) 1px, transparent 1px)', 
-                 backgroundSize: '40px 40px, 120px 120px, 120px 120px' 
-               }} />
-          
-          <div className="relative transform scale-100 transition-all origin-center">
+          <div className="absolute inset-0 overflow-hidden pointer-events-none">
+            <motion.div 
+              animate={{ 
+                scale: [1, 1.1, 1],
+                opacity: [0.1, 0.2, 0.1]
+              }}
+              transition={{ duration: 10, repeat: Infinity }}
+              className={cn(
+                "absolute -top-1/4 -left-1/4 w-[800px] h-[800px] rounded-full blur-[140px]",
+                state.theme === 'dark' ? "bg-emerald-500/20" : "bg-emerald-500/10"
+              )} 
+            />
+          </div>
+
+          <div className="relative flex flex-col items-center gap-6 max-h-full overflow-visible py-12">
             <div 
               className={cn(
-                "grid gap-2 p-6 rounded-[32px] backdrop-blur-xl border shadow-[0_32px_64px_-16px_rgba(0,0,0,0.3)] relative z-10",
-                state.theme === 'dark' ? "bg-zinc-900/40 border-white/5" : "bg-white/70 border-zinc-200"
+                "grid gap-2 p-4 sm:p-6 rounded-[48px] backdrop-blur-3xl border shadow-[0_32px_64px_-16px_rgba(0,0,0,0.5)] relative z-10 transition-all duration-500",
+                state.theme === 'dark' ? "bg-zinc-900/60 border-white/5 ring-1 ring-white/5" : "bg-white/80 border-zinc-200 ring-1 ring-zinc-200/50"
               )}
               style={{ 
                 gridTemplateColumns: `repeat(${state.gridSize}, minmax(0, 1fr))`,
@@ -608,21 +1107,24 @@ export default function App() {
               {grid.map((row, y) => row.map((cell, x) => (
                 <motion.div
                   key={`${x}-${y}`}
-                  whileHover={{ scale: 1.05 }}
+                  whileHover={{ 
+                    scale: 1.05, 
+                    backgroundColor: state.theme === 'dark' ? 'rgba(63, 63, 70, 0.8)' : 'rgba(228, 228, 231, 0.8)',
+                  }}
                   onClick={() => handleCellClick(x, y)}
                   className={cn(
-                    "w-12 h-12 sm:w-16 sm:h-16 rounded-xl flex items-center justify-center transition-all cursor-pointer relative group isolate",
+                    "w-12 h-12 sm:w-16 sm:h-16 rounded-xl flex items-center justify-center transition-all cursor-pointer relative group isolate active:scale-95",
                     cell === null 
-                      ? (state.theme === 'dark' ? "bg-zinc-800/30 hover:bg-zinc-700/50" : "bg-zinc-200/50 hover:bg-zinc-300/50") 
-                      : (state.theme === 'dark' ? "bg-zinc-700 shadow-lg" : "bg-white shadow-xl border border-zinc-100"),
-                    (selectedBuilding || movingBuilding) && !cell && "ring-2 ring-emerald-500/50 ring-dashed",
-                    movingBuilding?.x === x && movingBuilding?.y === y && "ring-2 ring-amber-500 ring-offset-4 ring-offset-black animate-pulse z-10"
+                      ? (state.theme === 'dark' ? "bg-zinc-950/30 hover:bg-zinc-800/40 shadow-inner" : "bg-zinc-200/40 hover:bg-zinc-300/60 shadow-inner") 
+                      : (state.theme === 'dark' ? "bg-zinc-800 border border-white/5 shadow-lg" : "bg-white border border-zinc-100 shadow-lg"),
+                    (selectedBuilding || movingBuilding) && !cell && "ring-2 ring-emerald-500/30 ring-inset animate-pulse",
+                    movingBuilding?.x === x && movingBuilding?.y === y && "ring-2 ring-amber-500 ring-offset-2 ring-offset-zinc-900 z-20"
                   )}
                 >
                   {cell ? (
                     <motion.div 
-                      layoutId={`building-${x}-${y}`}
-                      initial={{ scale: 0.8, opacity: 0 }}
+                      layoutId={`building-${cell}-${x}-${y}`}
+                      initial={{ scale: 0.5, opacity: 0 }}
                       animate={{ scale: 1, opacity: 1 }}
                       className="text-2xl sm:text-3xl filter drop-shadow-md hover:scale-110 transition-transform"
                     >
@@ -630,55 +1132,31 @@ export default function App() {
                     </motion.div>
                   ) : (
                     (selectedBuilding || movingBuilding) && (
-                      <div className="text-xl opacity-20 group-hover:opacity-50">
+                      <div className="text-xl opacity-10 group-hover:opacity-40 transition-opacity">
                         {selectedBuilding ? BuildingDataMap[selectedBuilding]?.emoji : BuildingDataMap[movingBuilding!.type]?.emoji || '❓'}
                       </div>
                     )
                   )}
-                  
-                  {/* Building Info on Hover */}
-                  {cell && (
-                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 p-2 bg-zinc-900 border border-zinc-800 rounded-lg opacity-0 group-hover:opacity-100 transition-all pointer-events-none scale-0 group-hover:scale-100 origin-bottom z-20 whitespace-nowrap shadow-2xl">
-                      <p className="text-[10px] font-bold text-white uppercase tracking-tighter">{BuildingDataMap[cell]?.name || 'Unknown'}</p>
-                      <div className="flex gap-2 mt-1">
-                        <span className="text-[8px] text-emerald-400 font-mono">+${BuildingDataMap[cell]?.income || 0}</span>
-                        <span className="text-[8px] text-rose-400 font-mono">Pol: {BuildingDataMap[cell]?.ecoImpact || 0}</span>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="absolute inset-2 border border-white/5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity" />
+                  <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 rounded-xl pointer-events-none" />
                 </motion.div>
               )))}
             </div>
 
             {/* Grid Controls */}
-            <div className="absolute -right-24 top-1/2 -translate-y-1/2 flex flex-col gap-2 group">
+            <div className="flex items-center gap-3 p-1.5 bg-zinc-950/60 backdrop-blur-2xl rounded-2xl border border-white/5 shadow-2xl relative z-20">
               <button 
                 onClick={expandGrid}
                 className={cn(
-                  "p-3 rounded-2xl border shadow-xl flex flex-col items-center gap-1 transition-all hover:scale-110",
-                  state.theme === 'dark' ? "bg-emerald-500 text-black" : "bg-emerald-600 text-white"
+                  "px-4 py-2 rounded-xl border flex items-center gap-2.5 transition-all hover:scale-105 active:scale-95 group",
+                  state.theme === 'dark' ? "bg-emerald-500 text-black border-emerald-400" : "bg-emerald-600 text-white border-emerald-500"
                 )}
               >
-                <Maximize2 size={24} />
-                <span className="text-[10px] font-bold uppercase tracking-tighter">Expand</span>
+                <Maximize2 size={14} className="group-hover:rotate-12 transition-transform" />
+                <span className="text-[10px] font-black uppercase tracking-widest">{t.expand}</span>
+                <span className="px-1.5 py-0.5 bg-black/10 rounded text-[8px] font-mono">
+                  ${(state.gridSize * 1000).toLocaleString()}
+                </span>
               </button>
-
-              <button 
-                onClick={minimizeGrid}
-                className={cn(
-                  "p-3 rounded-2xl border shadow-xl flex flex-col items-center gap-1 transition-all hover:scale-110",
-                  state.theme === 'dark' ? "bg-zinc-800 text-white border-zinc-700" : "bg-white text-zinc-900 border-zinc-200"
-                )}
-              >
-                <Minus size={24} />
-                <span className="text-[10px] font-bold uppercase tracking-tighter">Small</span>
-              </button>
-
-              <div className="mt-2 px-2 py-1 bg-black text-emerald-400 text-[10px] rounded border border-emerald-500/30 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity">
-                Next: ${(state.gridSize * 1000).toLocaleString()}
-              </div>
             </div>
           </div>
         </div>
@@ -766,10 +1244,13 @@ export default function App() {
               state.theme === 'dark' ? "bg-zinc-900 border-zinc-800" : "bg-white border-zinc-200"
             )}>
               <h3 className="text-xs font-bold text-zinc-400 flex items-center gap-2 mb-3 tracking-wide uppercase">
-                <Award size={14} className="text-amber-500" /> Milestones & Rewards
+                <Award size={14} className="text-amber-500" /> Dynamic Quests
               </h3>
               <div className="space-y-2">
-                 {state.achievements.map(ach => (
+                 {state.achievements
+                   .filter(a => !a.claimed) // Only show unclaimed
+                   .slice(0, 3) // Show only 3 active quests at a time
+                   .map(ach => (
                    <div 
                     key={ach.id}
                     className={cn(
@@ -827,116 +1308,148 @@ export default function App() {
         </div>
       </div>
 
-      {/* Bottom News Ticker */}
-      <div className="bg-emerald-500 text-black h-8 flex items-center overflow-hidden font-bold text-[11px] uppercase tracking-tighter whitespace-nowrap z-50">
-        <motion.div 
-          animate={{ x: [0, -1000] }}
-          transition={{ duration: 30, repeat: Infinity, ease: "linear" }}
-          className="flex gap-12"
-        >
-          {news.map((n, i) => (
-            <span key={i} className="flex items-center gap-3">
-              <span className="w-1.5 h-1.5 bg-black rounded-full" /> {n}
-            </span>
-          ))}
-          {news.map((n, i) => (
-            <span key={`dup-${i}`} className="flex items-center gap-3">
-              <span className="w-1.5 h-1.5 bg-black rounded-full" /> {n}
-            </span>
-          ))}
-        </motion.div>
+      {/* Bottom Ticker / News Bar */}
+      <div className={cn(
+        "h-8 border-t flex items-center px-4 overflow-hidden gap-6 z-50 transition-colors duration-500",
+        state.theme === 'dark' ? "bg-black border-white/5" : "bg-white border-zinc-200"
+      )}>
+        <div className="flex items-center gap-2.5 shrink-0 px-2 py-0.5 rounded-full bg-rose-500/10 border border-rose-500/20">
+          <div className="w-1.5 h-1.5 bg-rose-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(244,63,94,1)]" />
+          <span className="text-[9px] font-black uppercase tracking-[0.2em] text-rose-500">Live News</span>
+        </div>
+        <div className="flex-1 overflow-hidden">
+          <AnimatePresence mode="wait">
+            <motion.p 
+              key={newsIndex}
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: -20, opacity: 0 }}
+              className={cn(
+                "text-[10px] font-bold whitespace-nowrap tracking-wide",
+                state.theme === 'dark' ? "text-zinc-400" : "text-zinc-600"
+              )}
+            >
+              {newsList[newsIndex]}
+            </motion.p>
+          </AnimatePresence>
+        </div>
+        <div className="hidden sm:flex items-center gap-5 shrink-0 font-mono text-[8px] text-zinc-500 font-bold">
+          <div className="flex items-center gap-2">
+            <div className="w-1 h-1 bg-emerald-500 rounded-full animate-ping" />
+            <span className="uppercase opacity-60">Engine: Pulse-V2</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Activity size={10} className="text-emerald-500" />
+            <span>SYNC_STATE: {user ? 'CLOUD_ACTIVE' : 'LOCAL_ONLY'}</span>
+          </div>
+          <span className="opacity-40">{new Date().toLocaleTimeString([], { hour12: false })}</span>
+        </div>
       </div>
 
-      {/* Tutorial Overlay (First Start) */}
+      {/* Tutorial Overlay (First Start) - Redesigned Landing */}
       {!isGameStarted && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 text-center overflow-hidden">
-          {/* Animated Background Layers */}
+          {/* High-End Background */}
           <div className="absolute inset-0 bg-zinc-950" />
           <div className="absolute inset-0 opacity-40">
             <img 
               referrerPolicy="no-referrer"
-              src="https://images.unsplash.com/photo-1518005020250-675f042d3858?auto=format&fit=crop&q=80&w=2000" 
-              alt="City Backdrop" 
-              className="w-full h-full object-cover grayscale brightness-[0.2]"
+              src="https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&q=80&w=2000" 
+              alt="Sustainable City" 
+              className="w-full h-full object-cover grayscale brightness-50"
             />
           </div>
-          <div className="absolute inset-0 opacity-30" 
+          <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/80 to-transparent" />
+          
+          <div className="absolute inset-0 opacity-[0.15]" 
                style={{ 
-                 backgroundImage: 'radial-gradient(circle at 20% 30%, #10b981 0%, transparent 60%), radial-gradient(circle at 80% 70%, #3b82f6 0%, transparent 60%)',
-                 filter: 'blur(80px)'
+                 backgroundImage: 'radial-gradient(circle at 10% 10%, #10b981 0%, transparent 40%), radial-gradient(circle at 90% 90%, #6366f1 0%, transparent 40%)',
+                 filter: 'blur(100px)'
                }} 
           />
-          <div className="absolute inset-0 opacity-[0.05]" 
-               style={{ backgroundImage: 'url("https://www.transparenttextures.com/patterns/carbon-fibre.png")' }} />
           
           <motion.div 
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8 }}
-            className="max-w-md space-y-8 relative z-10"
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 1.2, ease: "easeOut" }}
+            className="max-w-xl space-y-12 relative z-10"
           >
-            <motion.div 
-              animate={{ 
-                rotateY: [0, 10, -10, 0],
-                y: [0, -10, 0]
-              }}
-              transition={{ duration: 4, repeat: Infinity }}
-              className="w-24 h-24 bg-gradient-to-br from-emerald-400 to-teal-600 rounded-[2rem] flex items-center justify-center mx-auto shadow-[0_20px_50px_rgba(16,185,129,0.4)]"
-            >
-              <Building2 size={48} className="text-black" />
-            </motion.div>
-            
-            <div className="space-y-4">
-              <motion.h2 
-                initial={{ opacity: 0, tracking: "-0.1em" }}
-                animate={{ opacity: 1, tracking: "-0.02em" }}
-                className="text-5xl font-black italic tracking-tighter text-white leading-none"
+            <div className="space-y-6">
+              <motion.div 
+                animate={{ 
+                  y: [0, -10, 0],
+                  filter: ["drop-shadow(0 0 10px rgba(16,185,129,0))", "drop-shadow(0 0 20px rgba(16,185,129,0.4))", "drop-shadow(0 0 10px rgba(16,185,129,0))"]
+                 }}
+                transition={{ duration: 3, repeat: Infinity }}
+                className="w-20 h-20 bg-emerald-500 rounded-[2rem] flex items-center justify-center mx-auto shadow-2xl"
               >
-                ECO-CITY<br/>
-                <span className="text-emerald-500">BALANCE.</span>
-              </motion.h2>
-              <p className="text-zinc-400 text-sm leading-relaxed max-w-xs mx-auto">
-                Anda terpilih sebagai City Manager. Bangun kota masa depan yang modern, makmur, dan tetap selaras dengan alam.
-              </p>
+                <Leaf size={40} className="text-black" />
+              </motion.div>
+              
+              <div className="space-y-2">
+                <motion.h1 
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.3 }}
+                  className="text-7xl md:text-8xl font-black italic tracking-tighter text-white leading-none overflow-hidden"
+                >
+                  ECO<span className="text-emerald-500">CITY</span>
+                </motion.h1>
+                <p className="text-zinc-400 text-sm font-medium uppercase tracking-[0.4em] translate-y-[-10px]">
+                  Civilization V2.0
+                </p>
+              </div>
+
+              <motion.p 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 0.6 }}
+                className="text-zinc-400 text-sm leading-relaxed max-w-sm mx-auto font-medium"
+              >
+                {state.language === 'id' 
+                  ? "Rancang masa depan yang berkelanjutan. Harmoni antara ekonomi, lingkungan, dan spiritualitas dalam satu simulasi."
+                  : "Design a sustainable future. Harmony between economy, environment, and spirituality in one simulation."}
+              </motion.p>
             </div>
 
-            <motion.div className="flex flex-col gap-3">
+            <motion.div className="flex flex-col gap-4 items-center">
               <button 
                 onClick={() => {
                   setIsGameStarted(true);
-                  // If fresh state, maybe set a default building
+                  setIsMusicPlaying(true);
                   if (state.buildings.length === 0) setSelectedBuilding('APARTMENT');
                 }}
-                className="group relative px-8 py-4 bg-emerald-500 text-black font-bold rounded-2xl hover:bg-emerald-400 transition-all uppercase tracking-widest text-xs shadow-xl active:scale-95 overflow-hidden"
+                className="group relative px-12 py-5 bg-emerald-500 text-black font-black rounded-2xl transition-all shadow-[0_20px_50px_-10px_rgba(16,185,129,0.5)] hover:scale-105 active:scale-95 flex items-center gap-4 overflow-hidden"
               >
                 <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
-                <span className="relative z-10 flex items-center justify-center gap-2">
-                  {state.buildings.length > 0 ? "Lanjutkan Membangun" : "Mulai Membangun"} <ChevronRight size={16} />
+                <span className="relative z-10 uppercase tracking-widest text-xs">
+                  {state.buildings.length > 0 ? t.continue : t.startNew}
                 </span>
+                <ChevronRight size={18} className="relative z-10 group-hover:translate-x-2 transition-transform" />
               </button>
 
-              {state.buildings.length > 0 && (
+              {!user ? (
                 <button 
-                  onClick={resetGame}
-                  className="px-8 py-3 bg-zinc-900 text-zinc-400 font-bold rounded-2xl border border-zinc-800 hover:bg-zinc-800 transition-all uppercase tracking-widest text-[10px]"
+                  onClick={handleLogin}
+                  className="w-full max-w-[280px] px-6 py-4 bg-zinc-900/50 backdrop-blur-xl text-white font-bold rounded-2xl flex items-center justify-center gap-3 hover:bg-zinc-800 transition-all border border-white/5 uppercase tracking-widest text-[9px] shadow-2xl"
                 >
-                  Mulai Game Baru (Reset)
+                  <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5 grayscale opacity-50 group-hover:grayscale-0 group-hover:opacity-100" />
+                  {state.language === 'id' ? "Hubungkan Cloud" : "Connect to Cloud"}
                 </button>
+              ) : (
+                <div className="flex flex-col items-center gap-2">
+                   <p className="text-[9px] text-zinc-500 font-black uppercase tracking-widest">{t.loggedAs}</p>
+                   <p className="text-xs text-emerald-400 font-bold bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/20">{user.email}</p>
+                   <button onClick={logout} className="text-[9px] text-zinc-600 hover:text-rose-500 uppercase font-bold tracking-widest transition-colors mt-2">Sign Out</button>
+                </div>
               )}
-              <p className="text-[10px] text-zinc-600 font-mono uppercase tracking-tighter">
-                Version 1.0.4 • Powered by Google AI
-              </p>
             </motion.div>
           </motion.div>
-
-          {/* Decorative Elements */}
-          <div className="absolute bottom-10 left-10 text-left hidden md:block">
-             <p className="text-[10px] text-zinc-500 font-mono">SYSTEM_STATUS</p>
-             <p className="text-xs text-emerald-500 font-bold">READY_TO_DEPLOY</p>
-          </div>
-          <div className="absolute top-10 right-10 text-right hidden md:block">
-             <p className="text-[10px] text-zinc-500 font-mono">ECO_VIBE</p>
-             <p className="text-xs text-blue-400 font-bold">BALANCED_FLOW</p>
+          
+          {/* Aesthetic Overlay */}
+          <div className="absolute bottom-10 left-10 text-left opacity-20 hidden md:block">
+             <p className="text-[10px] font-black font-mono text-zinc-500">SYSTEM_AUTH</p>
+             <p className="text-xs text-white font-bold">{user ? "READY" : "STANDBY"}</p>
           </div>
         </div>
       )}

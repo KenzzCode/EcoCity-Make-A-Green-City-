@@ -1,0 +1,44 @@
+{
+  "entities": {
+    "UserCity": {
+      "title": "User City State",
+      "description": "Stores the entire state of a user's city including buildings and stats.",
+      "type": "object",
+      "properties": {
+        "money": { "type": "number" },
+        "ecoHealth": { "type": "number" },
+        "pollution": { "type": "number" },
+        "population": { "type": "number" },
+        "taxRate": { "type": "number" },
+        "bankruptcyRisk": { "type": "number" },
+        "gridSize": { "type": "number" },
+        "theme": { "type": "string", "enum": ["dark", "light"] },
+        "buildings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "type": { "type": "string" },
+              "x": { "type": "number" },
+              "y": { "type": "number" },
+              "createdAt": { "type": "number" }
+            },
+            "required": ["id", "type", "x", "y", "createdAt"]
+          }
+        },
+        "achievements": { "type": "array" },
+        "history": { "type": "array" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "userId": { "type": "string" }
+      },
+      "required": ["money", "ecoHealth", "pollution", "population", "taxRate", "bankruptcyRisk", "gridSize", "theme", "buildings", "userId"]
+    }
+  },
+  "firestore": {
+    "/cities/{userId}": {
+      "schema": "UserCity",
+      "description": "User specific city data"
+    }
+  }
+}

@@ -18,12 +18,3 @@ View your app in AI Studio: https://ai.studio/apps/7a34049e-4837-4107-af97-dcf27
 2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
 3. Run the app:
    `npm run dev`
-
-
-Project Name: EcoCity - Make A Green City
-
-Developer: Kenzie Faiz Zikri Hamizan (Class 8A)
-
-Tech Stack: React, Vite, dikerjakan menggunakan Google Cloud Shell.
-
-Deployment Note: "Aplikasi dideploy menggunakan Vercel karena kendala aktivasi billing di Cloud Run, namun seluruh proses pengembangan dilakukan di lingkungan Google Cloud."

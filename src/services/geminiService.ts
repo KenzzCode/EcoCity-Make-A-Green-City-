@@ -26,7 +26,13 @@ export async function getCombinedAIContent(state: GameState): Promise<AIContent 
 
   const prompt = `
     You are the AI brain for "EcoCity: Balance".
-    Stats: Money $${state.money}, Eco-Health ${state.ecoHealth.toFixed(1)}, Pollution ${state.pollution.toFixed(1)}, Pop ${state.population}.
+    Stats: 
+    - Money: $${state.money}
+    - Eco-Health: ${state.ecoHealth.toFixed(1)}
+    - Pollution: ${state.pollution.toFixed(1)}
+    - Pop: ${state.population}
+    - Tax Rate: ${state.taxRate}%
+    - Bankruptcy Risk: ${state.bankruptcyRisk.toFixed(1)}%
     
     Tasks:
     1. Generate 3 news headlines (Indonesian/English mix) based on stats.
@@ -41,7 +47,7 @@ export async function getCombinedAIContent(state: GameState): Promise<AIContent 
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-1.5-flash",
+      model: "gemini-3-flash-preview",
       contents: prompt,
       config: {
         responseMimeType: "application/json",
@@ -84,7 +90,7 @@ export async function generateNewsTicker(state: GameState): Promise<string[]> {
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-1.5-flash",
+      model: "gemini-3-flash-preview",
       contents: prompt,
       config: {
         responseMimeType: "application/json",
@@ -121,7 +127,7 @@ export async function getSmartAdvisor(state: GameState): Promise<string> {
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-1.5-flash",
+      model: "gemini-3-flash-preview",
       contents: prompt
     });
 

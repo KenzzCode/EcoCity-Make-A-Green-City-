@@ -1,0 +1,62 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Validation Blueprint for UserCity
+    function isValidUserCity(data) {
+      return data.money is number &&
+             data.ecoHealth is number &&
+             data.pollution is number &&
+             data.population is number &&
+             data.taxRate is number &&
+             data.bankruptcyRisk is number &&
+             data.gridSize is number &&
+             data.theme in ['dark', 'light'] &&
+             data.buildings is list &&
+             data.achievements is list &&
+             data.history is list &&
+             data.userId == request.auth.uid &&
+             (data.updatedAt is string || !data.keys().hasAll(['updatedAt']));
+    }
+
+    match /cities/{userId} {
+      allow get: if isOwner(userId) && isValidId(userId);
+      
+      allow create: if isOwner(userId) && 
+                      isValidId(userId) && 
+                      isValidUserCity(incoming()) &&
+                      incoming().userId == userId; // Relational Sync
+                      
+      allow update: if isOwner(userId) && 
+                      isValidId(userId) && 
+                      isValidUserCity(incoming()) &&
+                      // Prevent identity spoofing
+                      incoming().userId == existing().userId;
+    }
+  }
+}
