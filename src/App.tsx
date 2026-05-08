@@ -106,15 +106,26 @@ function cn(...inputs: ClassValue[]) {
 
 // --- Components ---
 
-const StatCard = ({ label, value, icon: Icon, color, suffix = "", subValue }: { label: string, value: number | string, icon: any, color: string, suffix?: string, subValue?: string }) => (
-  <div className="bg-zinc-950/20 border border-white/10 p-2.5 px-3.5 rounded-2xl flex items-center gap-3 backdrop-blur-2xl shadow-[0_8px_32px_-8px_rgba(0,0,0,0.5)] relative overflow-hidden group min-w-[130px] transition-all hover:bg-zinc-900/40 hover:border-emerald-500/30">
+const StatCard = ({ label, value, icon: Icon, color, suffix = "", subValue, theme }: { label: string, value: number | string, icon: any, color: string, suffix?: string, subValue?: string, theme: 'dark' | 'light' }) => (
+  <div className={cn(
+    "p-2.5 px-3.5 rounded-2xl flex items-center gap-3 backdrop-blur-2xl relative overflow-hidden group min-w-[130px] transition-all border",
+    theme === 'dark' 
+      ? "bg-zinc-950/20 border-white/10 shadow-[0_8px_32px_-8px_rgba(0,0,0,0.5)] hover:bg-zinc-900/40 hover:border-emerald-500/30" 
+      : "bg-white/70 border-zinc-200 shadow-[0_8px_24px_-8px_rgba(0,0,0,0.1)] hover:bg-white/90 hover:border-emerald-500/30"
+  )}>
     <div className={cn("p-2 rounded-xl shrink-0 shadow-lg", color)}>
       <Icon size={14} className="text-white" />
     </div>
     <div className="z-10 min-w-0">
-      <p className="text-[7px] uppercase tracking-[0.25em] text-zinc-500 font-black truncate mb-1">{label}</p>
+      <p className={cn(
+        "text-[7px] uppercase tracking-[0.25em] font-black truncate mb-1",
+        theme === 'dark' ? "text-zinc-500" : "text-zinc-400"
+      )}>{label}</p>
       <div className="flex items-baseline gap-1">
-        <p className="text-sm font-mono font-black text-white tracking-tight leading-none">{value}{suffix}</p>
+        <p className={cn(
+          "text-sm font-mono font-black tracking-tight leading-none",
+          theme === 'dark' ? "text-white" : "text-zinc-900"
+        )}>{value}{suffix}</p>
         {subValue && <span className="text-[8px] text-zinc-500 font-mono italic opacity-60">{subValue}</span>}
       </div>
     </div>
@@ -122,7 +133,7 @@ const StatCard = ({ label, value, icon: Icon, color, suffix = "", subValue }: { 
   </div>
 );
 
-const BuildingItem = ({ type, data, onSelect, disabled, isSelected }: any) => {
+const BuildingItem = ({ type, data, onSelect, disabled, isSelected, theme }: any) => {
   return (
     <motion.button
       whileHover={{ scale: 1.02, x: 4 }}
@@ -133,16 +144,24 @@ const BuildingItem = ({ type, data, onSelect, disabled, isSelected }: any) => {
         "w-full p-3.5 rounded-2xl border transition-all flex flex-col gap-2.5 relative overflow-hidden group",
         isSelected 
           ? "border-emerald-500 bg-emerald-500/15 shadow-[0_0_20px_rgba(16,185,129,0.15)] ring-1 ring-emerald-500/50" 
-          : "border-white/5 bg-zinc-900/30 hover:border-white/20 hover:bg-zinc-900/50",
+          : theme === 'dark' 
+            ? "border-white/5 bg-zinc-900/30 hover:border-white/20 hover:bg-zinc-900/50"
+            : "border-zinc-200 bg-white/60 hover:border-zinc-300 hover:bg-white/90 shadow-sm",
         disabled && "opacity-30 grayscale cursor-not-allowed border-zinc-800"
       )}
     >
       <div className="flex justify-between items-center relative z-10">
-        <div className="w-10 h-10 bg-zinc-800/80 rounded-xl flex items-center justify-center text-2xl shadow-inner group-hover:scale-110 transition-transform">
+        <div className={cn(
+          "w-10 h-10 rounded-xl flex items-center justify-center text-2xl shadow-inner group-hover:scale-110 transition-transform",
+          theme === 'dark' ? "bg-zinc-800/80" : "bg-zinc-100"
+        )}>
           {data.emoji}
         </div>
         <div className="text-right">
-          <p className="text-[10px] font-black font-mono text-emerald-400 leading-none">${data.cost}</p>
+          <p className={cn(
+            "text-[10px] font-black font-mono leading-none",
+            theme === 'dark' ? "text-emerald-400" : "text-emerald-600"
+          )}>${data.cost}</p>
           <div className="flex gap-1 mt-1 justify-end">
             <div className={cn("w-1 h-1 rounded-full", data.ecoImpact > 0 ? "bg-emerald-500" : "bg-rose-500")} />
             <div className="w-1 h-1 rounded-full bg-amber-500" />
@@ -150,7 +169,10 @@ const BuildingItem = ({ type, data, onSelect, disabled, isSelected }: any) => {
         </div>
       </div>
       <div className="text-left relative z-10">
-        <p className="font-black text-xs text-white uppercase tracking-wider">{data.name}</p>
+        <p className={cn(
+          "font-black text-xs uppercase tracking-wider",
+          theme === 'dark' ? "text-white" : "text-zinc-900"
+        )}>{data.name}</p>
         <p className="text-[9px] text-zinc-500 line-clamp-1 mt-0.5 font-medium italic">"{data.description}"</p>
       </div>
       
@@ -710,8 +732,10 @@ export default function App() {
   };
 
   const handleLogin = async () => {
+    setNews(["Authenticating...", "Checking cloud credentials..."]);
     try {
       await loginWithGoogle();
+      setNews(["Login Success!", "Progress city kamu sekarang tersinkronisasi."]);
     } catch (error: any) {
       if (error.code === 'auth/popup-closed-by-user') {
         setNews(["Login cancelled.", "Akses ditutup oleh user. Coba lagi jika ingin sinkronisasi awan."]);
@@ -719,7 +743,7 @@ export default function App() {
         console.warn("Multiple popups attempted.");
       } else {
         console.error("Login failed", error);
-        setNews(["Login Error", "Terjadi kesalahan saat masuk. Silakan coba lagi."]);
+        setNews(["Login Error", "Gagal masuk. Coba cek koneksi atau buka di tab baru jika di iframe."]);
       }
     }
   };
@@ -746,7 +770,10 @@ export default function App() {
               <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent" />
             </div>
             <div className="hidden lg:block text-left">
-              <h1 className="font-black text-xl tracking-tighter leading-none text-white">ECO<span className="text-emerald-500">CITY</span></h1>
+              <h1 className={cn(
+                "font-black text-xl tracking-tighter leading-none",
+                state.theme === 'dark' ? "text-white" : "text-zinc-900"
+              )}>ECO<span className="text-emerald-500">CITY</span></h1>
               <div className="flex items-center gap-1.5 mt-1">
                 <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(16,185,129,1)]" />
                 <p className="text-[8px] text-emerald-500 font-black uppercase tracking-[0.3em]">Operational</p>
@@ -776,7 +803,10 @@ export default function App() {
                 <div className="w-3 h-3 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_10px_rgba(16,185,129,1)]" />
                 <div className="absolute inset-0 bg-emerald-500 rounded-full animate-ping opacity-30" />
               </div>
-              <p className="text-xs font-bold text-zinc-300 max-w-[400px] truncate">
+              <p className={cn(
+                "text-xs font-bold max-w-[400px] truncate",
+                state.theme === 'dark' ? "text-zinc-300" : "text-zinc-600"
+              )}>
                 {isAiLoading ? "Syncing..." : advisorMsg}
               </p>
               <button 
@@ -814,10 +844,10 @@ export default function App() {
               {state.language === 'id' ? 'ID' : state.language === 'en' ? 'EN' : 'AR'}
             </button>
             <div className="flex gap-2 p-2 bg-white/5 rounded-3xl backdrop-blur-2xl border border-white/5 overflow-x-auto scrollbar-hide">
-              <StatCard label={t.money} value={(state.money + metricJitter).toLocaleString()} color="bg-amber-500" icon={DollarSign} suffix="$" />
-              <StatCard label={t.eco} value={(state.ecoHealth + metricJitter).toFixed(2)} color="bg-emerald-500" icon={TrendingUp} suffix="%" />
-              <StatCard label={t.pollution} value={(state.pollution + metricJitter).toFixed(2)} color="bg-rose-500" icon={Wind} suffix="%" />
-              <StatCard label={t.citizens} value={Math.floor(state.population + (metricJitter > 0 ? 1 : 0)).toLocaleString()} color="bg-indigo-500" icon={Users} />
+              <StatCard label={t.money} value={(state.money + metricJitter).toLocaleString()} color="bg-amber-500" icon={DollarSign} suffix="$" theme={state.theme} />
+              <StatCard label={t.eco} value={(state.ecoHealth + metricJitter).toFixed(2)} color="bg-emerald-500" icon={TrendingUp} suffix="%" theme={state.theme} />
+              <StatCard label={t.pollution} value={(state.pollution + metricJitter).toFixed(2)} color="bg-rose-500" icon={Wind} suffix="%" theme={state.theme} />
+              <StatCard label={t.citizens} value={Math.floor(state.population + (metricJitter > 0 ? 1 : 0)).toLocaleString()} color="bg-indigo-500" icon={Users} theme={state.theme} />
             </div>
 
             <button 
@@ -932,13 +962,16 @@ export default function App() {
         {/* Left Sidebar: Buildings & Advisor - Optimized HUD Style */}
         <div className={cn(
           "w-full lg:w-80 border-r flex flex-col shrink-0 z-40 transition-all duration-500",
-          state.theme === 'dark' ? "bg-black/60 border-white/5" : "bg-zinc-50/80 border-zinc-200"
+          state.theme === 'dark' ? "bg-black/60 border-white/5" : "bg-white border-zinc-200 shadow-[20px_0_40px_-20px_rgba(0,0,0,0.05)]"
         )}>
           <div className="p-5 space-y-6">
             <div className="flex items-center justify-between">
               <div className="flex flex-col">
                 <h2 className="text-[9px] font-black uppercase tracking-[0.3em] text-zinc-500">{t.construction}</h2>
-                <p className="text-xs font-bold text-zinc-300 mt-1">{state.language === 'id' ? 'Gedung Ramah Lingkungan' : 'Sustainable Buildings'}</p>
+                <p className={cn(
+                  "text-xs font-bold mt-1",
+                  state.theme === 'dark' ? "text-zinc-300" : "text-zinc-600"
+                )}>{state.language === 'id' ? 'Gedung Ramah Lingkungan' : 'Sustainable Buildings'}</p>
               </div>
               <button 
                 onClick={toggleDeleteMode}
@@ -946,7 +979,9 @@ export default function App() {
                   "p-2 px-3 rounded-xl transition-all flex items-center gap-2 border shadow-lg",
                   isDeleteMode 
                     ? "bg-rose-500 text-black border-rose-400 font-black text-[9px] uppercase" 
-                    : "bg-zinc-900/80 text-zinc-400 border-white/5 hover:border-rose-500/50 text-[9px] uppercase font-black"
+                    : state.theme === 'dark'
+                      ? "bg-zinc-900/80 text-zinc-400 border-white/5 hover:border-rose-500/50 text-[9px] uppercase font-black"
+                      : "bg-white text-zinc-500 border-zinc-200 hover:border-rose-500/50 text-[9px] uppercase font-black"
                 )}
               >
                 <Trash2 size={12} />
@@ -954,7 +989,10 @@ export default function App() {
               </button>
             </div>
 
-            <div className="p-4 bg-zinc-900/40 rounded-2xl border border-white/10 shadow-inner">
+            <div className={cn(
+              "p-4 rounded-2xl border shadow-inner",
+              state.theme === 'dark' ? "bg-zinc-900/40 border-white/10" : "bg-zinc-100/50 border-zinc-200"
+            )}>
                <div className="flex justify-between text-[8px] font-black uppercase text-zinc-500 mb-3 tracking-[0.2em]">
                  <span>{t.taxRate}</span>
                  <span className={cn(state.taxRate > 25 ? "text-rose-500" : "text-emerald-400")}>{state.taxRate}%</span>
@@ -1028,31 +1066,46 @@ export default function App() {
           "flex-1 relative overflow-auto flex items-center justify-center p-4 lg:p-8 transition-all duration-700",
           state.theme === 'dark' 
             ? "bg-[#020617] bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-emerald-950/20 via-slate-950 to-black" 
-            : "bg-zinc-100 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-emerald-50/40 via-zinc-100 to-zinc-200"
+            : "bg-white bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-emerald-50/60 via-zinc-50 to-stone-100"
         )}>
           {/* Enhanced Eco-Background with Image */}
           <div className="absolute inset-0 overflow-hidden pointer-events-none">
-            <div className="absolute inset-0 opacity-20">
+            <div className={cn(
+              "absolute inset-0 opacity-20",
+              state.theme === 'light' && "opacity-[0.08]"
+            )}>
                <img 
                  src="https://images.unsplash.com/photo-1518005020250-675f042d3858?auto=format&fit=crop&q=80&w=2000" 
                  alt="Background" 
-                 className="w-full h-full object-cover grayscale brightness-50 contrast-125"
+                 className={cn(
+                   "w-full h-full object-cover grayscale contrast-125",
+                   state.theme === 'dark' ? "brightness-50" : "brightness-100 contrast-75"
+                 )}
                />
             </div>
-            <div className="absolute inset-0 bg-gradient-to-br from-black/80 via-black/40 to-black/80" />
+            <div className={cn(
+              "absolute inset-0",
+              state.theme === 'dark' ? "bg-gradient-to-br from-black/80 via-black/40 to-black/80" : "bg-gradient-to-br from-white/90 via-white/40 to-white/90"
+            )} />
             
             {/* Biological Mesh Grid */}
-            <div className="absolute inset-0 opacity-[0.03]" 
-                 style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, #10b981 1px, transparent 0)', backgroundSize: '40px 40px' }} />
+            <div className={cn(
+              "absolute inset-0 opacity-[0.03]",
+              state.theme === 'light' && "opacity-[0.05]"
+            )} 
+                 style={{ backgroundImage: `radial-gradient(circle at 1px 1px, ${state.theme === 'dark' ? '#10b981' : '#059669'} 1px, transparent 0)`, backgroundSize: '40px 40px' }} />
             
             {/* Moving Light Beams */}
             <motion.div 
               animate={{ 
                 x: [-100, 100],
-                opacity: [0.1, 0.3, 0.1]
+                opacity: state.theme === 'dark' ? [0.1, 0.3, 0.1] : [0.05, 0.2, 0.05]
               }}
               transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
-              className="absolute top-0 bottom-0 w-32 bg-emerald-500/10 blur-[80px] -skew-x-12"
+              className={cn(
+                "absolute top-0 bottom-0 w-32 blur-[80px] -skew-x-12",
+                state.theme === 'dark' ? "bg-emerald-500/10" : "bg-emerald-500/5"
+              )}
               style={{ left: '30%' }}
             />
 
@@ -1197,10 +1250,13 @@ export default function App() {
 
         {/* Right Sidebar: Real-time Graphs */}
         <div className={cn(
-          "w-full lg:w-96 border-l flex flex-col overflow-hidden",
-          state.theme === 'dark' ? "bg-zinc-950 border-zinc-800" : "bg-zinc-50 border-zinc-200"
+          "w-full lg:w-96 border-l flex flex-col overflow-hidden transition-all duration-500",
+          state.theme === 'dark' ? "bg-zinc-950 border-zinc-800" : "bg-white border-zinc-200 shadow-2xl"
         )}>
-          <div className="p-4 border-b border-zinc-800/20">
+          <div className={cn(
+            "p-4 border-b",
+            state.theme === 'dark' ? "border-zinc-800/20" : "border-zinc-100"
+          )}>
             <h2 className="text-xs font-bold uppercase tracking-widest text-zinc-500 mb-4 flex items-center gap-2">
               <TrendingUp size={14} className="text-emerald-500" /> Real-time Metrics
             </h2>
@@ -1254,12 +1310,12 @@ export default function App() {
                    <div 
                     key={ach.id}
                     className={cn(
-                      "p-3 rounded-xl text-xs transition-all relative overflow-hidden",
+                      "p-3 rounded-xl text-xs transition-all relative overflow-hidden border",
                       ach.claimed 
-                        ? "bg-zinc-800/10 border border-zinc-800/30 text-zinc-600 grayscale" 
+                        ? (state.theme === 'dark' ? "bg-zinc-800/10 border-zinc-800/30 text-zinc-600 grayscale" : "bg-zinc-100 border-zinc-200 text-zinc-400 grayscale")
                         : ach.completed 
-                          ? "bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 cursor-pointer hover:bg-emerald-500/20" 
-                          : "bg-zinc-800/30 border border-zinc-700/30 text-zinc-500"
+                          ? (state.theme === 'dark' ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400 cursor-pointer hover:bg-emerald-500/20" : "bg-emerald-50 border-emerald-200 text-emerald-600 cursor-pointer hover:bg-emerald-100")
+                          : (state.theme === 'dark' ? "bg-zinc-800/30 border-zinc-700/30 text-zinc-500" : "bg-zinc-50 border-zinc-100 text-zinc-600")
                     )}
                     onClick={() => ach.completed && !ach.claimed && claimAchievement(ach.id)}
                    >
